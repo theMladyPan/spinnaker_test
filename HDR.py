@@ -51,6 +51,8 @@ parser.add_argument('dirname', type=str, help='directory to save images')
 
 # optional arguments
 parser.add_argument('--gain', type=float, default=1.0, help='gain value to set')
+parser.add_argument('--exp_min', type=float, default=30.0, help='minimum exposure time')
+parser.add_argument('--exp_max', type=float, default=65000.0, help='maximum exposure time')
 
 args = parser.parse_args()
 
@@ -131,7 +133,9 @@ def configure_exposure(cam, exposure: float):
             print('Unable to set exposure time. Aborting...')
             return False
         
-        exp_min, exp_max = cam.ExposureTime.GetMin(), cam.ExposureTime.GetMax()
+        cam_exp_min, cam_exp_max = cam.ExposureTime.GetMin(), cam.ExposureTime.GetMax()
+        exp_min = max(cam_exp_min, args.exp_min)
+        exp_max = min(cam_exp_max, args.exp_max)
                 
         if exposure <= 1:
             exposure = log_map_0_1(exposure, exp_min, exp_max)
@@ -423,9 +427,9 @@ def create_HDR():
     times = np.array([float(i.split("_")[1].split(".")[0]) for i in image_names], dtype=np.float32)
     print(image_names, times)
 
-    # Align images
-    alignMTB = cv2.createAlignMTB()
-    alignMTB.process(images, images)
+    # Align images, skip this step if you have portrait EXIF tags
+    # alignMTB = cv2.createAlignMTB()
+    # alignMTB.process(images, images)
 
     # Create HDR image
     calibrateDebevec = cv2.createCalibrateDebevec()
@@ -436,7 +440,7 @@ def create_HDR():
     print('saved hdr image')
     
     # Tone map the HDR image to convert it to an 8-bit image
-    toneMapper = cv2.createTonemap(2.2)  # 2.2 is a commonly used gamma value
+    toneMapper = cv2.createTonemap(2)  # 2.2 is a commonly used gamma value
     ldrDebevec = toneMapper.process(hdrDebevec)
 
     # The result of tone mapping is a float array, we need to convert it to 8-bit
@@ -446,6 +450,18 @@ def create_HDR():
     # Save the 8-bit image as a JPG
     cv2.imwrite('ldr_image.jpg', ldrDebevec_8bit)
     print('saved ldr image')
+    
+    # Merge images using Exposure Fusion
+    mergeMertens = cv2.createMergeMertens()
+    fusion = mergeMertens.process(images)
+
+    # The result of mergeMertens.process() is a float array with values in the range [0, 1], so it needs to be normalized to the range [0, 255] for saving as a JPG image
+    fusion_8bit = np.clip(fusion*255, 0, 255).astype('uint8')
+
+    # Save the result
+    cv2.imwrite('fusion.jpg', fusion_8bit)
+    print('saved fusion image')
+    
 
 if __name__ == '__main__':
     try: 
